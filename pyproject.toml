@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "entrain"
+version = "0.1.0"
+description = "A music system where the listener is part of the loop — sense the crowd, steer the music in real time."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+    "opencv-python>=4.9",        # camera capture (cv2.VideoCapture)
+    "sounddevice>=0.4",          # audio output stream (PortAudio)
+    "mediapipe>=0.10",           # frozen pose estimation
+    "mlx>=0.18",                 # trained boxes: affect head + control policy
+    # generation: MRT2 / ACE-Step / Stable Audio added per output-stage choice.
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+# Streaming generative engine (engine: mrt2). Heavy; Apple Silicon + MLX.
+# After install: `mrt models init && mrt models download`.
+mrt2 = ["magenta-rt[mlx]>=2.0"]
+
+[project.scripts]
+entrain-stage1 = "entrain.runtime.app:run_stage1"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

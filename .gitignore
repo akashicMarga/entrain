@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.DS_Store
+
+# weights / data / model assets — never commit (auto-downloaded on first run)
+*.safetensors
+*.npz
+*.ckpt
+*.task
+checkpoints/
+models/
+data/
+footage/
+library/

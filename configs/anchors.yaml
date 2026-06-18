@@ -1,0 +1,12 @@
+# Anchor prompts spanning the musical range.
+# Embedded ONCE into the generator's shared text/audio style space (anchors.py).
+# Crowd state becomes weights over these; the style vector is the weighted blend.
+#
+# ORDER MATTERS: list low-energy -> high-energy. HeuristicPolicy assumes this axis.
+anchors:
+  - name: calm
+    prompt: "calm ambient downtempo, warm pads, slow and spacious"
+  - name: groove
+    prompt: "groovy deep house, steady four-on-the-floor, warm bassline"
+  - name: peak
+    prompt: "peak-time techno, driving, high energy, relentless"

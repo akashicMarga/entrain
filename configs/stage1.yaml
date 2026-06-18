@@ -1,0 +1,69 @@
+# Stage 1 runtime config — heuristic mapping + smoothing/rate-limiting.
+# Stage 1 trains nothing; these are the only knobs.
+
+engine: synth              # synth (audible now) | selection (de-risked) | mrt2 (generative)
+library_dir: null          # required when engine == selection
+source: camera             # camera (webcam) | synthetic (headless moving-blob)
+responsive: true           # false = freeze steering after warmup (static-generative A/B
+                           #   baseline: "is the closed loop more engaging than fixed music?")
+
+mrt2:                      # streaming generator (engine: mrt2). ~2x real-time on M-Pro.
+  size: mrt2_small         # mrt2_small (230M, any Apple Silicon) | mrt2_base (2.4B, higher quality)
+  frames_per_chunk: 4      # 4 frames = 160ms per generate call (smaller = snappier drums)
+  audio_buffer: 2          # generate-ahead depth. LOWER = more responsive to your moves
+                           #   (each buffered chunk is committed old-style audio). 2 = ~0.3s.
+  temperature: 1.3
+  top_k: 40
+  cfg_musiccoca: 3.0       # classifier-free-guidance: how strongly it follows the style
+  # movement -> drums: a tempo-locked pulse (from your bob/sway) + onset accents (hits).
+  # Thresholds are CALIBRATED per-session ("above YOUR resting level"), not absolute, so
+  # the pulse doesn't fire constantly on a spurious seated-bob tempo.
+  drums: true
+  cfg_drums: 4.0           # how hard MRT2 obeys the drum hint (higher = more literal)
+  drum_gate: 0.1           # min movement above rest (motion-energy units) before a pulse;
+                           #   raise if drums fire while you're nearly still, lower if it
+                           #   takes too much movement to start a beat
+  onset_rise_sigma: 1.5    # accent = an energy jump this many spreads above your usual
+  onset_floor: 1.0         # ... and only while movement is at least this far above rest
+  onset_refractory: 5      # frames to wait before another accent can fire
+  # hand -> melody: raise your hand to play a pentatonic lead line.
+  melody: true
+  cfg_notes: 2.0           # how hard MRT2 obeys the note hint
+  melody_root: 48          # lowest MIDI pitch (48 = C3)
+  melody_octaves: 2        # pitch range spanned by hand height
+  melody_threshold: 0.35   # hand must be raised above this (0=down,1=up) to play
+
+camera:
+  device: 0
+  fps: 30
+
+pose:
+  backend: mediapipe       # mediapipe (real skeletons + tempo + synchrony) | framediff
+  num_poses: 2             # 2+ enables cross-subject synchrony when people share the frame
+  motion_gain: 12.0        # scales keypoint-velocity into a 0..1 energy (gross movement)
+  micro_gain: 250.0        # scales the tiny sway/nod of a near-still listener into 0..1
+
+affect:                    # valence/arousal from face blendshapes (close-range)
+  enabled: true
+  num_faces: 3
+
+rppg:                      # contactless heart rate (POS); close-range, motion-sensitive
+  enabled: true
+  window_s: 8.0            # analysis window; longer = steadier BPM, slower to update
+
+state:
+  # asymmetric smoothing — "hold the vibe": quick to rise, slow to fall
+  attack: 0.45             # blend toward a rising value (responsive)
+  release: 0.04            # blend toward a falling value (sluggish; eases down over seconds)
+  micro_weight: 0.6        # how much a still listener's micromotion counts vs gross motion
+                           #   (drives energy/arousal when the listener is seated, not dancing)
+
+policy:
+  # all signals fold into one "drive": movement (primary) + mood + heart tension.
+  sharpness: 4.0           # how peaked the soft anchor assignment is
+  synchrony_weight: 0.0    # mix cross-subject synchrony into steering (needs 2+ people)
+  valence_weight: 0.25     # smile nudges the music up, frown down
+  hr_weight: 0.2           # heart rate above your baseline builds energy/tension
+
+style_slot:
+  max_step: 0.12           # max L2 style-vector move per write (anti-twitch only)
