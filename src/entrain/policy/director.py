@@ -63,6 +63,72 @@ class StaticDirector:
         return None      # fixed set — never changes
 
 
+class HeuristicDirector:
+    """A revising Director with NO model — the "basic version with a director".
+
+    Picks a MODE (a stylistic modifier over the base anchors) from the slow room context and
+    re-authors only when the mode changes. Demonstrates the planning layer, including the
+    thing a reactive controller can't do: RESTRAINT — it won't ride a build forever, it eases
+    off after `sustain_cap_s`. Keeps the base anchor NAMES (calm/groove/peak), appending a
+    suffix to each prompt, so (a) the fast policy is unaffected and (b) the synth's keyword
+    embedder still matches. The character shift is what re-steers the generator's timbre/drums.
+
+    Same `Director` Protocol as Static/Llm — swap by config (`director: heuristic`).
+    """
+
+    # mode -> (suffix appended to every base prompt, intent label)
+    _MODES = {
+        "neutral": ("", "neutral groove"),
+        "lift": (", brighter, more driving, building energy", "building"),
+        "cool": (", warmer, softer, more spacious, easing off", "cooling down"),
+    }
+
+    def __init__(self, config_path: str = "configs/anchors.yaml",
+                 trend_up: float = 0.004, trend_down: float = -0.004,
+                 sustain_cap_s: float = 45.0) -> None:
+        import yaml
+
+        prompts = yaml.safe_load(Path(config_path).read_text())["anchors"]
+        self._base = [(p["name"], p["prompt"]) for p in prompts]   # ordered low -> high
+        self.trend_up = trend_up            # energy slope (/s) that counts as "rising"
+        self.trend_down = trend_down        # ... and as "falling"
+        self.sustain_cap_s = sustain_cap_s  # restraint: max time to hold a build before easing
+        self._mode = "neutral"
+        self._mode_since = 0.0
+
+    def _directive_for(self, mode: str) -> Directive:
+        suffix, intent = self._MODES[mode]
+        return Directive(
+            anchors=[AnchorSpec(name=n, prompt=p + suffix) for n, p in self._base],
+            intent=intent,
+        )
+
+    def initial(self) -> Directive:
+        return self._directive_for(self._mode)
+
+    def _choose(self, ctx: DirectorContext) -> str:
+        held = ctx.elapsed_s - self._mode_since
+        # RESTRAINT first: don't ride a build forever -> ease off once held too long.
+        if self._mode == "lift" and held >= self.sustain_cap_s:
+            return "cool"
+        if ctx.energy_trend >= self.trend_up:
+            return "lift"
+        if ctx.energy_trend <= self.trend_down:
+            return "cool"
+        # settled + flat after a cooldown -> drift back to neutral
+        if self._mode == "cool" and held >= self.sustain_cap_s:
+            return "neutral"
+        return self._mode
+
+    def revise(self, ctx: DirectorContext) -> Directive | None:
+        desired = self._choose(ctx)
+        if desired == self._mode:
+            return None                     # unchanged -> skip the re-embed
+        self._mode = desired
+        self._mode_since = ctx.elapsed_s
+        return self._directive_for(desired)
+
+
 class LlmDirector:
     """🪸 The planner: a small instruction-tuned LLM that AUTHORS anchor prompts + arc from a
     language view of the room. Runs every `revise_every_s` (NOT in the control loop).

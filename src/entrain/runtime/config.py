@@ -17,14 +17,17 @@ DEFAULTS: dict[str, Any] = {
     "source": "camera",
     # responsive=False freezes steering after warmup -> static-generative A/B baseline.
     "responsive": True,
+    # slow director (planning layer): static = fixed anchors | heuristic = revises character
+    "director": "heuristic",
+    "director_revise_every_s": 8.0,
     # MRT2 streaming generator (engine: mrt2). 2.4B "mrt2_base" needs a Pro/Max chip for
     # real-time; "mrt2_small" (230M) runs on any Apple Silicon.
     "mrt2": {"size": "mrt2_small", "frames_per_chunk": 4, "temperature": 1.3,
              "top_k": 40, "cfg_musiccoca": 3.0, "audio_buffer": 2,
-             # movement-driven drums: tempo-locked pulse + onset accents. Thresholds are
-             # CALIBRATED per-session (SignalCalibrator) -> "above your own resting level",
-             # not absolute, so they don't fire constantly on a still seated bob.
-             "drums": True, "cfg_drums": 4.0,
+             # movement-driven drums: tempo-locked pulse + onset accents. OFF by default —
+             # the drum hint tended to fight the music; with it off the channel sends -1
+             # (model's choice). Flip to True to re-enable the calibrated movement drums.
+             "drums": False, "cfg_drums": 4.0,
              "drum_gate": 0.1,          # min movement above rest (motion-energy units) to pulse
              "onset_rise_sigma": 1.5,   # accent = a jump this many spreads above your usual
              "onset_floor": 1.0,        # ... and only while at least this far above rest

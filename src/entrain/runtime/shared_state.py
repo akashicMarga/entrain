@@ -42,6 +42,10 @@ class StyleSlot:
         self._onset = False
         self._drum_hit = False      # latched for the HUD so it never misses a hit
         self._melody_pitch: int | None = None   # current lead pitch (None = not playing)
+        # A new Directive from the slow director loop, awaiting re-embed. The vision loop
+        # sets it; the AUDIO loop drains it and re-embeds (anchor embedding is MLX work and
+        # must run on the generation thread).
+        self._pending_directive = None
 
     def write(self, style: StyleVector, tempo: float | None = None) -> None:
         """Called by the vision loop. Style rate-limited; tempo EMA-smoothed."""
@@ -71,6 +75,18 @@ class StyleSlot:
     def tempo(self) -> float:
         with self._lock:
             return self._tempo
+
+    def set_pending_directive(self, directive) -> None:
+        """Vision loop: a new Director-authored anchor set, awaiting re-embed."""
+        with self._lock:
+            self._pending_directive = directive
+
+    def take_pending_directive(self):
+        """Audio loop: read and clear the pending Directive (None if none)."""
+        with self._lock:
+            d = self._pending_directive
+            self._pending_directive = None
+            return d
 
     def set_onset(self) -> None:
         """Vision loop: a movement accent happened (sticky until consumed)."""

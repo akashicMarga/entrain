@@ -7,6 +7,11 @@ source: camera             # camera (webcam) | synthetic (headless moving-blob)
 responsive: true           # false = freeze steering after warmup (static-generative A/B
                            #   baseline: "is the closed loop more engaging than fixed music?")
 
+# slow DIRECTOR layer (the planner above the fast policy)
+director: heuristic        # heuristic = revises anchor character from the room's arc (no model)
+                           #   | static = fixed anchors.yaml, never revised
+director_revise_every_s: 8.0   # how often the director re-evaluates the set (seconds)
+
 mrt2:                      # streaming generator (engine: mrt2). ~2x real-time on M-Pro.
   size: mrt2_small         # mrt2_small (230M, any Apple Silicon) | mrt2_base (2.4B, higher quality)
   frames_per_chunk: 4      # 4 frames = 160ms per generate call (smaller = snappier drums)
@@ -16,9 +21,9 @@ mrt2:                      # streaming generator (engine: mrt2). ~2x real-time o
   top_k: 40
   cfg_musiccoca: 3.0       # classifier-free-guidance: how strongly it follows the style
   # movement -> drums: a tempo-locked pulse (from your bob/sway) + onset accents (hits).
-  # Thresholds are CALIBRATED per-session ("above YOUR resting level"), not absolute, so
-  # the pulse doesn't fire constantly on a spurious seated-bob tempo.
-  drums: true
+  # OFF by default — the movement drum hint fought the music; with it off the channel sends
+  # -1 (model's own drums). Set true to re-enable the per-session-calibrated movement drums.
+  drums: false
   cfg_drums: 4.0           # how hard MRT2 obeys the drum hint (higher = more literal)
   drum_gate: 0.1           # min movement above rest (motion-energy units) before a pulse;
                            #   raise if drums fire while you're nearly still, lower if it

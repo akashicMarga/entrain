@@ -28,7 +28,7 @@ class AudioLoop:
     """Fast loop. Pulls chunks from the engine using the freshest style vector."""
 
     def __init__(self, engine: MusicEngine, sink: AudioSink, slot: StyleSlot,
-                 warmup=None) -> None:
+                 warmup=None, anchors: AnchorBank | None = None) -> None:
         self.engine = engine
         self.sink = sink
         self.slot = slot
@@ -36,6 +36,8 @@ class AudioLoop:
         # Keeping it here means all MLX work (load, embed, generate) shares one thread,
         # which MLX requires (streams are thread-local).
         self.warmup = warmup
+        # The anchor bank, so a Director re-author (also MLX work) re-embeds on THIS thread.
+        self.anchors = anchors
         self._stop = threading.Event()
 
     def run(self) -> None:
@@ -44,6 +46,11 @@ class AudioLoop:
             self.warmup()
         self.sink.open()
         while not self._stop.is_set():
+            # Slow director loop authored new anchors? Re-embed here (MLX thread-affinity),
+            # between chunks. Atomic swap, so the vision loop never sees a half-built set.
+            pending = self.slot.take_pending_directive()
+            if pending is not None and self.anchors is not None:
+                self.anchors.reauthor_and_embed(pending)
             style = self.slot.read()
             if style is not None:
                 self.engine.set_style(style)
@@ -78,6 +85,9 @@ class VisionLoop:
         melody_mapper=None,
         calibrator=None,
         drum_gate: float = 0.1,
+        director=None,
+        episode=None,
+        revise_every_s: float = 8.0,
     ) -> None:
         self.camera = camera
         self.pose = pose
@@ -104,6 +114,13 @@ class VisionLoop:
         # Set by the audio loop once anchors are embedded (they're embedded on the audio
         # thread for MLX thread-affinity); blending can't happen until then.
         self.ready = ready
+        # The SLOW planning layer. The director revises the anchor set every revise_every_s;
+        # the episode buffer is its memory (state trajectory + action log). Both optional.
+        self.director = director
+        self.episode = episode
+        self.revise_every_s = revise_every_s
+        self._last_revise: float | None = None    # frame.t of the last director tick
+        self._directive_since: float | None = None
         self._stop = threading.Event()
         self._warned = False
 
@@ -142,6 +159,23 @@ class VisionLoop:
                 if self.calibrator is not None and excess < self.drum_gate:
                     tempo = 0.0
                 self.slot.write(style, tempo=tempo)
+
+                # --- slow director tick (the planning layer) -----------------------
+                if self.episode is not None:
+                    self.episode.add_state(frame.t, state)        # the loop's memory
+                if self.director is not None and self.episode is not None:
+                    if self._last_revise is None:
+                        self._last_revise = self._directive_since = frame.t
+                    elif frame.t - self._last_revise >= self.revise_every_s:
+                        self._last_revise = frame.t
+                        ctx = self.episode.director_context(
+                            frame.t, seconds_in_directive=frame.t - self._directive_since)
+                        directive = self.director.revise(ctx)
+                        if directive is not None:
+                            # Re-embed happens on the AUDIO thread; we just hand it over.
+                            self.slot.set_pending_directive(directive)
+                            self.episode.add_action(frame.t, directive=directive)
+                            self._directive_since = frame.t
             except Exception as e:
                 if not self._warned:
                     self._warned = True

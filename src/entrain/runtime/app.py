@@ -22,9 +22,10 @@ from entrain.perception.affect import AffectReader
 from entrain.perception.pose import FrameDiffPoseReader, MediaPipePoseReader
 from entrain.perception.rppg import RppgReader
 from entrain.policy.anchors import AnchorBank
-from entrain.policy.director import StaticDirector
+from entrain.policy.director import HeuristicDirector, StaticDirector
 from entrain.policy.heuristic import HeuristicPolicy
 from entrain.runtime.config import load_config
+from entrain.runtime.episode import EpisodeBuffer
 from entrain.runtime.loops import AudioLoop, VisionLoop
 from entrain.runtime.shared_state import StyleSlot
 from entrain.state.estimator import StateEstimator
@@ -67,10 +68,15 @@ def run_stage1(
     # load, anchor embed, generation — shares one thread (MLX streams are thread-local).
     engine = build_engine(cfg)
     # The slow DIRECTOR layer authors the anchor set; the fast policy weights over it.
-    # Stage 1 uses StaticDirector (the fixed configs/anchors.yaml anchors) — swap in
-    # LlmDirector to let a small LLM author prompts + arc on a seconds-scale cadence.
-    director = StaticDirector()
+    #   static    = fixed configs/anchors.yaml anchors, never revised
+    #   heuristic = revises the anchor character from the room's arc (no model)
+    # Swap in LlmDirector/VlmDirector later to author prompts + arc with a model.
+    director = (
+        HeuristicDirector() if cfg["director"] == "heuristic" else StaticDirector()
+    )
     anchors = AnchorBank(embed_fn=engine.embed_text, directive=director.initial())
+    # The director's memory: state trajectory + action log -> context + training tuples.
+    episode = EpisodeBuffer(fps=cam_cfg["fps"])
     policy = HeuristicPolicy(                                 # Stage 1: no training
         anchor_names=anchors.names,
         sharpness=pol_cfg["sharpness"],
@@ -129,7 +135,7 @@ def run_stage1(
         anchors.embed()
         anchors_ready.set()
 
-    audio = AudioLoop(engine, sink, slot, warmup=warmup)
+    audio = AudioLoop(engine, sink, slot, warmup=warmup, anchors=anchors)
 
     # HUD (optional) runs on the MAIN thread; the audio loop is the background thread, so
     # the window never blocks the sound. Without a HUD, both loops are background threads.
@@ -173,6 +179,9 @@ def run_stage1(
         melody_mapper=melody_mapper,
         calibrator=calibrator,
         drum_gate=drum_gate,
+        director=director,
+        episode=episode,
+        revise_every_s=cfg["director_revise_every_s"],
     )
 
     t_audio = threading.Thread(target=audio.run, name="audio", daemon=True)

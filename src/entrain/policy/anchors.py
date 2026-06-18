@@ -50,6 +50,19 @@ class AnchorBank:
         self._set_prompts(directive)
         self._anchors = None        # force a re-embed; blend() raises until embed() runs
 
+    def reauthor_and_embed(self, directive: Directive) -> None:
+        """Atomic re-author: embed the new prompts, then replace the live `AnchorSet` in ONE
+        assignment — no `None` window, so a concurrent `blend()` on the vision thread always
+        sees a valid set. MUST run on the generation thread (it calls `embed_fn`). The
+        Director keeps the anchor NAMES stable, so the policy's weights stay meaningful
+        across the swap; only the prompts' character changes."""
+        prompts = [{"name": a.name, "prompt": a.prompt} for a in directive.anchors]
+        names = [a.name for a in directive.anchors]
+        embeddings = np.stack([self.embed_fn(p["prompt"]) for p in prompts])
+        self._prompts = prompts
+        self._names = names
+        self._anchors = AnchorSet(names=names, embeddings=embeddings)   # atomic swap
+
     @property
     def names(self) -> list[str]:
         return self._names
