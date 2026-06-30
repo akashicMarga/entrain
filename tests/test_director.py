@@ -11,10 +11,12 @@ from entrain.policy.director import HeuristicDirector, LlmDirector, StaticDirect
 from entrain.types import AnchorSpec, Directive, DirectorContext
 
 
-def _ctx(elapsed_s: float = 0.0, energy_trend: float = 0.0) -> DirectorContext:
+def _ctx(elapsed_s: float = 0.0, energy_trend: float = 0.0,
+         last_response_synchrony: float = 0.0) -> DirectorContext:
     return DirectorContext(
         elapsed_s=elapsed_s, energy_mean=0.5, energy_trend=energy_trend,
         valence_mean=0.0, synchrony_mean=0.0, seconds_in_directive=elapsed_s,
+        last_response_synchrony=last_response_synchrony,
     )
 
 
@@ -73,6 +75,24 @@ def test_heuristic_director_eases_off_a_long_build_restraint():
     # still rising, but held past the cap -> the director eases off anyway (restraint)
     eased = d.revise(_ctx(elapsed_s=60.0, energy_trend=0.02))
     assert eased is not None and eased.intent == "cooling down"
+
+
+def test_heuristic_director_holds_course_when_synchrony_rises():
+    """A move that raised synchrony -> keep the same mode (it's working), so revise is None."""
+    d = HeuristicDirector(sync_eps=0.03)
+    d.revise(_ctx(elapsed_s=0.0, energy_trend=0.02))            # -> lift
+    # synchrony rose after that lift, energy trend now flat -> stay lifting (no change)
+    assert d.revise(_ctx(elapsed_s=8.0, energy_trend=0.0,
+                         last_response_synchrony=0.2)) is None
+
+
+def test_heuristic_director_reverses_when_synchrony_falls():
+    """A build that LOWERED synchrony backfired -> reverse to cooling, ignoring energy."""
+    d = HeuristicDirector(sync_eps=0.03)
+    d.revise(_ctx(elapsed_s=0.0, energy_trend=0.02))            # -> lift
+    out = d.revise(_ctx(elapsed_s=8.0, energy_trend=0.02,       # still "rising" energy...
+                        last_response_synchrony=-0.2))          # ...but the room pulled apart
+    assert out is not None and out.intent == "cooling down"     # synchrony wins over trend
 
 
 def test_anchor_bank_reauthor_and_embed_is_atomic():

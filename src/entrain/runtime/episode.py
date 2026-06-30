@@ -118,8 +118,13 @@ class EpisodeBuffer:
     # --- readers (the seams out) ------------------------------------------------
 
     def director_context(self, now: float, seconds_in_directive: float = 0.0,
-                         instruction: str = "", window_s: float = 20.0) -> DirectorContext:
-        """The slow aggregated view the Director reasons over, over the last `window_s`."""
+                         instruction: str = "", window_s: float = 20.0,
+                         feedback_lag_s: float = 0.0) -> DirectorContext:
+        """The slow aggregated view the Director reasons over, over the last `window_s`.
+
+        If `feedback_lag_s > 0`, also reports the synchrony response to the director's most
+        recent scorable action (`last_transition`) — the "did my last move work?" signal.
+        """
         win = [(t, s) for (t, s) in self._states if now - t <= window_s]
         if win:
             ts = np.array([t for t, _ in win], dtype=np.float64)
@@ -136,11 +141,17 @@ class EpisodeBuffer:
             )
         else:
             energy_mean = valence_mean = synchrony_mean = energy_trend = 0.0
+        last_resp = 0.0
+        if feedback_lag_s > 0:
+            tr = self.last_transition(feedback_lag_s, now=now)
+            if tr is not None:
+                last_resp = tr.response_synchrony
         return DirectorContext(
             elapsed_s=(now - self.t0) if self.t0 is not None else 0.0,
             energy_mean=energy_mean, energy_trend=energy_trend,
             valence_mean=valence_mean, synchrony_mean=synchrony_mean,
             seconds_in_directive=seconds_in_directive, instruction=instruction,
+            last_response_synchrony=last_resp,
         )
 
     def transitions(self, lag_s: float, now: float | None = None) -> list[Transition]:

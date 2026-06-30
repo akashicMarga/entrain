@@ -133,6 +133,14 @@ def test_style_slot_freezes_when_not_responsive():
     assert slot.melody is None
 
 
+def test_style_slot_carries_director_status_for_the_hud():
+    slot = StyleSlot()
+    assert slot.directive_intent == "" and slot.last_response == 0.0   # defaults
+    slot.set_director_status("building", 0.12)
+    assert slot.directive_intent == "building"
+    assert slot.last_response == 0.12
+
+
 def test_style_slot_responsive_still_updates():
     slot = StyleSlot(max_step=2.0, responsive=True)   # > sqrt(2) jump, no rate-limit here
     slot.write(StyleVector(vec=np.array([1, 0, 0, 0], dtype=np.float32)))

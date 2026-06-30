@@ -85,7 +85,7 @@ class HeuristicDirector:
 
     def __init__(self, config_path: str = "configs/anchors.yaml",
                  trend_up: float = 0.004, trend_down: float = -0.004,
-                 sustain_cap_s: float = 45.0) -> None:
+                 sustain_cap_s: float = 45.0, sync_eps: float = 0.03) -> None:
         import yaml
 
         prompts = yaml.safe_load(Path(config_path).read_text())["anchors"]
@@ -93,6 +93,7 @@ class HeuristicDirector:
         self.trend_up = trend_up            # energy slope (/s) that counts as "rising"
         self.trend_down = trend_down        # ... and as "falling"
         self.sustain_cap_s = sustain_cap_s  # restraint: max time to hold a build before easing
+        self.sync_eps = sync_eps            # min |Δsynchrony| to read the last move as a signal
         self._mode = "neutral"
         self._mode_since = 0.0
 
@@ -108,9 +109,21 @@ class HeuristicDirector:
 
     def _choose(self, ctx: DirectorContext) -> str:
         held = ctx.elapsed_s - self._mode_since
+        resp = ctx.last_response_synchrony     # did the room get MORE together after my move?
+
         # RESTRAINT first: don't ride a build forever -> ease off once held too long.
         if self._mode == "lift" and held >= self.sustain_cap_s:
             return "cool"
+
+        # FEEDBACK — hill-climb on synchrony (the impact metric, not energy):
+        #   last move RAISED synchrony  -> it's working, stay the course
+        #   last move LOWERED synchrony -> it backfired, reverse direction
+        if resp >= self.sync_eps:
+            return self._mode
+        if resp <= -self.sync_eps:
+            return "cool" if self._mode == "lift" else "lift"
+
+        # No clear synchrony signal yet (|resp| < eps) -> fall back to the energy trend.
         if ctx.energy_trend >= self.trend_up:
             return "lift"
         if ctx.energy_trend <= self.trend_down:

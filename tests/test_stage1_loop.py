@@ -103,3 +103,48 @@ def test_vision_loop_steers_toward_peak_with_motion():
     dancing = run_with_motion(18.0)
     assert dancing["peak"] > still["peak"]
     assert dancing["peak"] > dancing["calm"]
+
+
+# --- director snapshots (before/after capture for a future VLM) -----------------
+
+def test_vision_loop_captures_before_after_snapshots_on_directive_change():
+    from entrain.runtime.episode import EpisodeBuffer
+    from entrain.types import AnchorSet, AnchorSpec, Directive, Frame, PoseFeatures
+
+    class _Cam:                       # yields timed frames, then ends the loop
+        def frames(self):
+            for i in range(20):
+                yield Frame(rgb=np.zeros((8, 8, 3), dtype=np.uint8),
+                            t=i * 0.1, frame_id=i)         # dt=0.1s
+
+    class _Pose:                      # constant movement; loop never calls .load()
+        def __call__(self, frame):
+            return PoseFeatures(motion_energy=0.5, movement_tempo=0.0, synchrony=0.3)
+
+    class _Director:                  # forces exactly one directive change
+        def __init__(self):
+            self._done = False
+        def initial(self):
+            return Directive(anchors=[AnchorSpec("calm", "c")], intent="neutral groove")
+        def revise(self, ctx):
+            if self._done:
+                return None
+            self._done = True
+            return Directive(anchors=[AnchorSpec("calm", "c")], intent="building")
+
+    names = SynthEngine.ANCHOR_ORDER
+    anchors = AnchorBank(embed_fn=SynthEngine().embed_text)
+    anchors._anchors = AnchorSet(names=names, embeddings=np.eye(len(names), dtype=np.float32))
+    ep = EpisodeBuffer(fps=10)
+    loop = VisionLoop(
+        _Cam(), _Pose(), StateEstimator(), HeuristicPolicy(anchor_names=names),
+        anchors, StyleSlot(max_step=1.0),
+        director=_Director(), episode=ep, revise_every_s=0.3,   # tick fast for the test
+    )
+    loop.run()
+
+    labels = [s.label for s in ep.snapshots]
+    assert any(l == "before:building" for l in labels)   # captured the room that prompted it
+    assert any(l == "after:building" for l in labels)     # ... and the room after the lag
+    assert all(s.frame is not None for s in ep.snapshots) # frames stored for the VLM
+    assert all(s.frame.shape == (2, 2, 3) for s in ep.snapshots)  # thumbnailed (8/4)

@@ -24,6 +24,12 @@ from entrain.runtime.shared_state import StyleSlot
 from entrain.state.estimator import StateEstimator
 
 
+def _thumb(rgb):
+    """A cheap, copied thumbnail of a frame for snapshot storage — small enough to keep many
+    in memory, big enough for a VLM to read the scene's before/after gist."""
+    return rgb[::4, ::4].copy()
+
+
 class AudioLoop:
     """Fast loop. Pulls chunks from the engine using the freshest style vector."""
 
@@ -121,6 +127,10 @@ class VisionLoop:
         self.revise_every_s = revise_every_s
         self._last_revise: float | None = None    # frame.t of the last director tick
         self._directive_since: float | None = None
+        self._directive_intent = ""                # current intent (for the HUD)
+        # A scheduled "after" snapshot: (due_t, intent). Captured once its effect window
+        # elapses, to pair with the "before" frame taken at the directive change (VLM prep).
+        self._pending_after: tuple[float, str] | None = None
         self._stop = threading.Event()
         self._warned = False
 
@@ -163,19 +173,42 @@ class VisionLoop:
                 # --- slow director tick (the planning layer) -----------------------
                 if self.episode is not None:
                     self.episode.add_state(frame.t, state)        # the loop's memory
+                    # Capture the scheduled "after" frame once the effect window elapsed.
+                    if (self._pending_after is not None
+                            and frame.t >= self._pending_after[0]):
+                        _, intent = self._pending_after
+                        self.episode.snapshot(frame.t, state, label=f"after:{intent}",
+                                              frame=_thumb(frame.rgb))
+                        self._pending_after = None
                 if self.director is not None and self.episode is not None:
                     if self._last_revise is None:
                         self._last_revise = self._directive_since = frame.t
+                        self._directive_intent = self.director.initial().intent
+                        self.slot.set_director_status(self._directive_intent, 0.0)
                     elif frame.t - self._last_revise >= self.revise_every_s:
                         self._last_revise = frame.t
+                        # feedback_lag = the revise cadence: score the directive made one
+                        # cycle ago by the synchrony change since (did my last move work?).
                         ctx = self.episode.director_context(
-                            frame.t, seconds_in_directive=frame.t - self._directive_since)
+                            frame.t, seconds_in_directive=frame.t - self._directive_since,
+                            feedback_lag_s=self.revise_every_s)
                         directive = self.director.revise(ctx)
                         if directive is not None:
                             # Re-embed happens on the AUDIO thread; we just hand it over.
                             self.slot.set_pending_directive(directive)
                             self.episode.add_action(frame.t, directive=directive)
                             self._directive_since = frame.t
+                            self._directive_intent = directive.intent
+                            # Snapshot the room that prompted the change ("before") and
+                            # schedule its "after" — the before/after pair a VlmDirector
+                            # compares to judge the move.
+                            self.episode.snapshot(frame.t, state,
+                                                  label=f"before:{directive.intent}",
+                                                  frame=_thumb(frame.rgb))
+                            self._pending_after = (
+                                frame.t + self.revise_every_s, directive.intent)
+                        self.slot.set_director_status(
+                            self._directive_intent, ctx.last_response_synchrony)
             except Exception as e:
                 if not self._warned:
                     self._warned = True

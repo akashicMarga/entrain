@@ -147,6 +147,18 @@ class Hud:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.42, _DIM, 1)
         y += 18
 
+        # Director (slow planner): what it's doing now + the synchrony feedback it acted on.
+        intent = self.slot.directive_intent if self.slot is not None else ""
+        if intent:
+            resp = self.slot.last_response if self.slot is not None else 0.0
+            rc = _ACCENT if resp > 0.02 else ((70, 70, 230) if resp < -0.02 else _DIM)
+            cv2.putText(panel, f"director  {intent}", (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, (205, 180, 255), 1)
+            y += 16
+            cv2.putText(panel, f"  dsync {resp:+.2f}", (x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, rc, 1)
+            y += 18
+
         self._sparkline(cv2, panel, x, panel.shape[0] - 54, _PANEL_W - 2 * x, 44)
         cv2.putText(panel, "q / esc to quit", (x, panel.shape[0] - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, _DIM, 1)

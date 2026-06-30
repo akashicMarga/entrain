@@ -68,6 +68,20 @@ def test_actions_can_log_a_directive():
     assert trans[0].action.directive.intent == "cool down"
 
 
+def test_director_context_reports_last_synchrony_response():
+    """director_context surfaces Δsynchrony after the last action when given a feedback lag —
+    the 'did my last move work?' signal the HeuristicDirector hill-climbs on."""
+    buf = EpisodeBuffer(fps=10, history_s=60)
+    for i in range(40):
+        t = i * 0.1
+        sync = 0.1 if t < 2.5 else 0.7
+        buf.add_state(t=t, state=_state(energy=0.5, synchrony=sync))
+    buf.add_action(t=2.0, directive=Directive(anchors=[AnchorSpec("peak", "p")]))
+    ctx = buf.director_context(now=3.9, feedback_lag_s=1.0)
+    assert ctx.last_response_synchrony > 0.5             # the move raised synchrony
+    assert buf.director_context(now=3.9).last_response_synchrony == 0.0   # off without a lag
+
+
 def test_snapshot_capture_keeps_frame_optional():
     buf = EpisodeBuffer()
     buf.snapshot(t=1.0, state=_state(energy=0.3), label="before")

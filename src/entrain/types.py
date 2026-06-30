@@ -123,6 +123,8 @@ class DirectorContext:
     synchrony_mean: float
     seconds_in_directive: float    # how long the current Directive has been live
     instruction: str = ""          # natural-language steer from the operator (optional)
+    last_response_synchrony: float = 0.0   # Δsynchrony AFTER the director's last move — did
+                                           #   the room get more together? (the feedback signal)
 
 
 # --- policy / generation interface ----------------------------------------------

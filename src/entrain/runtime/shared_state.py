@@ -46,6 +46,9 @@ class StyleSlot:
         # sets it; the AUDIO loop drains it and re-embeds (anchor embedding is MLX work and
         # must run on the generation thread).
         self._pending_directive = None
+        # Director status for the HUD (what the planner is doing + its last feedback).
+        self._directive_intent = ""
+        self._last_response = 0.0
 
     def write(self, style: StyleVector, tempo: float | None = None) -> None:
         """Called by the vision loop. Style rate-limited; tempo EMA-smoothed."""
@@ -87,6 +90,22 @@ class StyleSlot:
             d = self._pending_directive
             self._pending_directive = None
             return d
+
+    def set_director_status(self, intent: str, last_response: float) -> None:
+        """Vision loop: the slow director's current intent + last synchrony feedback (HUD)."""
+        with self._lock:
+            self._directive_intent = intent
+            self._last_response = last_response
+
+    @property
+    def directive_intent(self) -> str:
+        with self._lock:
+            return self._directive_intent
+
+    @property
+    def last_response(self) -> float:
+        with self._lock:
+            return self._last_response
 
     def set_onset(self) -> None:
         """Vision loop: a movement accent happened (sticky until consumed)."""
